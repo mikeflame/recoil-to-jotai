@@ -1,0 +1,58 @@
+{
+  "skill_name": "recoil-to-jotai",
+  "evals": [
+    {
+      "id": 1,
+      "name": "full-migration-kata",
+      "prompt": "The app in this directory uses Recoil and we're done with it. Migrate the whole thing to Jotai 3 \u2014 jotai, jotai-family, jotai-loadable and fast-deep-equal are already in node_modules, no network needed. When you're finished `npm run check` (tsc + vitest) must pass and no file under src/ may import 'recoil'. Keep behaviour identical: the theme must still persist under the same localStorage key, resetting the thermostat must still work, the search family must not re-create atoms on every render, and the user from the server props must still land in state before the first render.",
+      "expected_output": "src/ fully on Jotai: npm run check passes, zero 'recoil' imports; searchResultsFamily uses atomFamily with a deep-equal areEqual; themeAtom is atomWithStorage with key 'app_theme' and validation; tempFahrenheit handles RESET; userAtom is hydrated via useHydrateAtoms inside the Provider; loadable/unwrap atoms created at module level; refresh via atomWithRefresh or a tick atom; tests ported to createStore.",
+      "files": [],
+      "expectations": [
+        "`npm run typecheck` exits 0 after the migration",
+        "`npm run test` exits 0 after the migration with the same five test cases still present",
+        "No file under src/ imports from 'recoil' (grep returns nothing) and package.json no longer lists recoil as a dependency",
+        "The search family is an atomFamily (jotai-family) created with an areEqual comparator (fast-deep-equal or equivalent), so object parameters are compared by value",
+        "The theme atom uses atomWithStorage with the storage key 'app_theme' and still validates stored values",
+        "The fahrenheit writable atom accepts RESET and resetting it restores 20\u00b0C (test or component evidence)",
+        "The server-provided user is hydrated with useHydrateAtoms (or an equivalent store.set before first render) inside the Jotai Provider, not with a useEffect after mount",
+        "Loadable/unwrap wrapper atoms are defined once at module level, never inside a component body",
+        "The posts refresh is implemented with atomWithRefresh or a tick atom read inside the async read, and the refresh button still triggers a refetch",
+        "The transcript shows the inventory script was run (or an equivalent dependency analysis) before editing"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "plan-only-no-edits",
+      "prompt": "We are considering moving this app off Recoil to Jotai but nobody on the team has done it before. Don't change any code yet. Analyse the state layer in src/ and tell me: how many atoms/selectors/families there are, which ones are risky and why, what order you'd migrate them in, and which decisions you need from me before starting.",
+      "expected_output": "A written analysis with no source changes: 17 features (7 atoms, 7 selectors, 2 atomFamilies, 1 selectorFamily); risks named (object-param selectorFamily, effect-backed theme atom with storage layout, initializeState hydration, loadable consumers, DefaultValue reset, waitForAll/noWait); an order (free features, then small components); explicit decisions (Jotai 2 vs 3, storage layout, SSR/hydration seam, jotai-family).",
+      "files": [],
+      "expectations": [
+        "No file under src/ was modified (git status clean apart from generated report files)",
+        "The analysis reports 17 Recoil features with the correct breakdown: 7 atoms, 7 selectors, 2 atomFamilies, 1 selectorFamily (compare with totals.byKind in the inventory JSON if one was generated)",
+        "searchResultsFamily is called out as risky because its parameter is an object compared by value in Recoil and by reference in Jotai",
+        "themeAtom's localStorage effect is called out, including that the storage key/layout must be preserved for existing users",
+        "The RecoilRoot initializeState hydration of userAtom is identified and a useHydrateAtoms-based seam is proposed",
+        "The proposed order migrates isolated features first and keeps dependent features together (or explains bridges), rather than file-by-file",
+        "The response asks the user to decide the target Jotai major version (2 vs 3) before starting",
+        "The response lists the Loadable consumers (useRecoilValueLoadable/useRecoilStateLoadable, valueMaybe, .contents) as call sites that change shape"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "incremental-two-components",
+      "prompt": "Start our Recoil \u2192 Jotai migration with the smallest safe slice: move the counter state (counterAtom, doubleSelector) and the thermostat state (tempCelsiusAtom, tempFahrenheitSelector) to Jotai, and leave everything else on Recoil for now \u2014 both libraries will coexist for a while. `npm run check` must stay green and the existing tests for those selectors must keep passing on Jotai.",
+      "expected_output": "Both runtimes mounted (Jotai Provider inside/alongside RecoilRoot); exactly those four features on Jotai with Counter.tsx and Thermostat.tsx updated; tempFahrenheit handles RESET so useResetAtom works; the counter helper hook typed with PrimitiveAtom; the relevant tests ported to createStore while the other tests still run on Recoil; npm run check passes; the remaining 13 features untouched.",
+      "files": [],
+      "expectations": [
+        "`npm run check` exits 0 after the change",
+        "counterAtom, doubleSelector, tempCelsiusAtom and tempFahrenheitSelector are defined with jotai and no longer with recoil; all other state files still use recoil",
+        "A Jotai Provider is mounted so that components using both runtimes work (RecoilRoot is still present)",
+        "The fahrenheit atom's write function handles RESET (typeof RESET in its argument type or an explicit RESET branch) and Thermostat uses useResetAtom",
+        "Counter.tsx's helper hook parameter type changed from RecoilState<number> to a Jotai atom type (PrimitiveAtom<number> or WritableAtom)",
+        "The double/fahrenheit tests run against a Jotai store (createStore / store.set / store.get) while the user/todo/posts tests remain on snapshot_UNSTABLE",
+        "No file other than the two state files, the two components, App/provider wiring and the test file was changed",
+        "The transcript shows the agent checked dependencies (inventory or equivalent) and explained why these four features need no bridge"
+      ]
+    }
+  ]
+}

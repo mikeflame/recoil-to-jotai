@@ -1,0 +1,17 @@
+{
+  "name": "mikeflame",
+  "owner": {
+    "name": "Mike Savonik",
+    "url": "https://github.com/mikeflame"
+  },
+  "description": "Skills by Mike Savonik.",
+  "plugins": [
+    {
+      "name": "recoil-to-jotai",
+      "source": "./",
+      "description": "Migrate a React code base from Recoil to Jotai incrementally, with an inventory, a plan and gates.",
+      "category": "engineering",
+      "keywords": ["recoil", "jotai", "migration", "react"]
+    }
+  ]
+}

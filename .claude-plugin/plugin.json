@@ -1,0 +1,14 @@
+{
+  "name": "recoil-to-jotai",
+  "version": "0.1.0",
+  "description": "Migrate a React code base from Recoil to Jotai incrementally: dependency-graph inventory, ease scores, hub-cut migration plan, v2/v3 API map and the hard cases.",
+  "author": {
+    "name": "Mike Savonik",
+    "url": "https://github.com/mikeflame"
+  },
+  "homepage": "https://github.com/mikeflame/recoil-to-jotai",
+  "repository": "https://github.com/mikeflame/recoil-to-jotai",
+  "license": "MIT",
+  "keywords": ["recoil", "jotai", "migration", "react", "state-management", "codemod"],
+  "skills": ["./skills/recoil-to-jotai"]
+}

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Recoil to Jotai"
+  short_description: "Inventory, plan and migrate Recoil state to Jotai"
