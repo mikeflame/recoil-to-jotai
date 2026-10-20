@@ -126,7 +126,9 @@ Store lifetime on a server:
   interim choice, documented in the code.
 
 Hydration from page props (Next.js pages router, Remix loaders): `useHydrateAtoms` runs once per
-store, during the first render, so the SSR output and the first client render agree. It does
+store, during the first render, so the SSR output and the first client render agree. Call it in
+a wrapper that renders the page as its children (`<Hydrate values={…}>{children}</Hydrate>`), not
+in a sibling rendered "first": siblings have no ordering guarantee a reviewer can see. It does
 not re-run when props change on client-side navigation; keep a small effect component that
 `useSetAtom`s the changed props (the equivalent of a `PagePropsSyncer` next to `RecoilRoot`).
 

@@ -80,9 +80,10 @@ you deferred and why.
 - Mount a Jotai `<Provider>` **inside** `RecoilRoot` (so bridge components can use both). On SSR
   frameworks create the store once per app instance and read `references/hard-cases.md` § 3
   before deciding whether the server renders the Provider at all.
-- Add the hydration seam: a component inside the Provider that calls `useHydrateAtoms` with the
-  same server values `initializeState` sets, plus an effect that re-syncs props that change on
-  client navigation. Nothing uses it yet; it is the landing zone.
+- Add the hydration seam: a wrapper component inside the Provider that calls `useHydrateAtoms`
+  with the same server values `initializeState` sets and then renders its children (a wrapper,
+  not a sibling, so nothing can render before the hydration by accident), plus an effect that
+  re-syncs props that change on client navigation. Nothing uses it yet; it is the landing zone.
 - Add `state/jotai/` helpers that the mappings will need: the loadable helper module
   (`valueMaybe`, `errorMaybe`), a `familyAtom` wrapper that always passes a deep-equal
   `areEqual` and a `setShouldRemove` policy, the storage adapter that preserves the existing
@@ -106,10 +107,12 @@ Per feature, in this order:
    `refresh-counter`) and the ease reasons. Put the Jotai definition in the project's Jotai
    folder (the overlay names it; otherwise mirror the layout the project already uses, such as
    `<area>/jotai/`). Keep it in the same file as the Recoil definition only when the whole file
-   moves in this change. Keep a read function synchronous when an SSR guard returns a value
-   synchronously: marking it `async` turns that guard value into a pending promise and changes
-   the server-rendered markup. Delete the Recoil definition in the same change once no consumer
-   is left.
+   moves in this change. Keep the exported names and the test locations the project has: a
+   migration step is not the moment to rename `fooSelector` to `fooAtom` or to move tests into
+   new files — note the rename as a follow-up for when Recoil is gone. Keep a read function
+   synchronous when an SSR guard returns a value synchronously: marking it `async` turns that
+   guard value into a pending promise and changes the server-rendered markup. Delete the Recoil
+   definition in the same change once no consumer is left.
 2. **Consumers.** The inventory lists every file and its roles. Hooks are mechanical;
    `useRecoilValueLoadable` consumers change shape (§ 6); callbacks, refreshers and imperative
    sets follow § 7 and § 5; `ref` roles (atoms passed to helpers or props) need the helper's
@@ -132,8 +135,9 @@ Per change (fragment, component or wave), the gate — all of it, every time:
   decision" must not have grown;
 - for waves: the retired bridges of this wave are deleted, and no bridge's source has migrated.
 
-Then commit with a message that names the features moved and the bridges added/removed, and
-report to the user:
+Then commit with a message that names the features moved and the bridges added/removed. The
+diff must contain the migration and nothing else: no generated `.recoil-to-jotai/` reports
+(gitignored, or only `baseline.json` tracked), no drive-by refactors. Report to the user:
 
 ```
 Moved: <features> (<kind counts>) in <n> files; bridges added/removed: …
