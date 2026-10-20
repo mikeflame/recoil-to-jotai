@@ -228,3 +228,19 @@ test('hub cut prefers atoms and selectors over families at equal degree', async 
   const cut = hubCut(ids, depsOf, dependentsOf, 8, (id) => id === 'F');
   assert.deepEqual(cut.hubs.map((h) => h.id), ['A'], 'A and F tie on degree; the family is weighted down');
 });
+
+test('flags refresh counters, uses relative ids and prints no bridge table for atomic components', () => {
+  assert.equal(byName.refreshTickAtom.flags.refreshCounter, true, 'read only as a bare get(tick) statement');
+  assert.equal(byName.counterAtom.flags.refreshCounter, false);
+  assert.equal(byName.userAtom.flags.refreshCounter, false);
+  assert.equal(inventory.decisions['refresh counters (fold each with its selector into one atomWithRefresh)'].count, 1);
+  assert.equal(byName.userAtom.id, 'src/state/atoms.ts#userAtom');
+  assert.ok(byName.doubleSelector.deps[0].id.startsWith('src/state/'));
+  assert.ok(inventory.plan.components[0].members.every((id) => !id.startsWith('/')));
+  assert.ok(inventory.plan.components[0].hubCut === null);
+  assert.equal(inventory.attention.useRecoilCallback.count, 2);
+  const md = readFileSync(join(outDir, 'recoil-inventory.md'), 'utf8');
+  assert.doesNotMatch(md, /\| Wave \| Features \|/, 'all fixture components are atomic: no wave table at all');
+  assert.match(md, /Move together in one change:/);
+  assert.match(md, /### Mechanical, but check each use/);
+});

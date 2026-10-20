@@ -113,7 +113,12 @@ Store lifetime on a server:
 - Provider-less Jotai uses one process-wide store: request A's user leaks into request B. Never.
 - `<Provider>` without a `store` prop creates a store per Provider instance, so one per request.
   Create it once per app instance (`useState(() => createStore())` or a lazily filled ref) so
-  re-renders don't replace it.
+  re-renders don't replace it; `useRef(createStore())` builds and discards a store on every render.
+- Read the Provider code before believing what the history says about it. In one app the
+  "skip the Provider on the server" fix lived on an unmerged branch for months while master
+  still rendered `useRef(createStore())` + an unconditional Provider; the overlay written from
+  the commit message was wrong, and the migrator caught it only by running the inventory in a
+  clean worktree.
 - A store per request is safe only if module-level caches are bounded (§ 2) — the stores are
   garbage, the family maps are not.
 - If every Jotai atom in the app is client-only, rendering `children` without a Provider on the
@@ -143,8 +148,10 @@ that reads and writes the old blob, or run a one-time migration on first load. D
 before the first persisted atom moves, and write it down in the plan.
 
 `sessionStorage`: `createJSONStorage(() => sessionStorage)`. Cross-tab sync is built into the
-default `localStorage` storage through `subscribe`. Emulation/impersonation guards that
-disabled persistence in Recoil wrap the storage object instead.
+default `localStorage` storage through `subscribe`; a Recoil effect never had it, so a migrated
+atom gains a behaviour. Decide whether that is welcome; for strict parity create the storage
+object and delete its `subscribe`. Emulation/impersonation guards that disabled persistence in
+Recoil wrap the storage object instead.
 
 Non-storage effects (logging, syncing to an external store, `setSelf` from a subscription) map
 to `atom.onMount = (setAtom) => { const unsub = external.subscribe(setAtom); return unsub }` or
@@ -174,7 +181,9 @@ export const errorMaybe = <T>(l: Loadable<T>) => (l.state === 'hasError' ? l.err
 ```
 
 Create `loadable(x)` atoms at module level next to `x`. A `loadable()` call inside a component
-creates a new atom each render, which re-subscribes and re-suspends.
+creates a new atom each render, which re-subscribes and re-suspends; the same holds for
+`get(loadable(x))` inside a read function (the `noWait` replacement), which creates a new atom on
+every evaluation — define `const xLoadableAtom = loadable(x)` once and read that.
 
 Jotai 3 removed `loadable` from `jotai/utils`. Use the `jotai-loadable` package, the userland
 version from the v3 migration guide, or `unwrap(x, (prev) => prev)` when the consumer only wants
@@ -188,10 +197,14 @@ the live store. For a migration they are equivalent: `snapshot.getPromise(asyncA
 Keep the dependency array as the `useCallback` deps.
 
 `useRecoilRefresher_UNSTABLE(sel)` re-runs one selector. Define the atom with
-`atomWithRefresh(read)` and call its setter with no arguments. If several consumers refresh the
-same atom, or the atom must stay a plain primitive, read a counter atom inside the read function
-and bump it. Note that `refresh(sel)` inside a callback becomes `set(sel)`, which type-checks
-only for an `atomWithRefresh` atom.
+`atomWithRefresh(read)` and call its setter with no arguments: `onClick={refresh}` passes the
+click event and throws in development, so write `onClick={() => refresh()}`. The hand-rolled
+version of the same idea, a counter atom read as a bare `get(tick)` inside the selector and
+bumped by `useSetRecoilState(tick)`, folds into the same single `atomWithRefresh`; the inventory
+flags such counters as `refresh-counter`. Note that `refresh(sel)` inside a callback becomes
+`set(sel)`, which type-checks only for an `atomWithRefresh` atom, and that a `loadable()` of the
+atom reports `loading` while it refetches: when the previous rows must stay on screen, read it
+through `unwrap(sel, (prev) => prev)` instead.
 
 `snapshot_UNSTABLE` in tests becomes `createStore()` (§ 9).
 

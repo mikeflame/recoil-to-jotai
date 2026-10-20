@@ -21,23 +21,30 @@ decisions (folders, SSR policy, storage layout, pending questions) and overrides
 
 ## Step 1 — Inventory
 
-Run the scanner from the project root; it uses the project's own `typescript` and needs no install:
+Run the scanner from the repository root; it uses the project's own `typescript` (resolved from
+the package that owns `<srcRoot>`) and needs no install:
 
 ```bash
 node <skill>/scripts/inventory.mjs <srcRoot>          # e.g. src, frontend, apps/web/src
 cp .recoil-to-jotai/recoil-inventory.json .recoil-to-jotai/baseline.json
 ```
 
+Output lands in `./.recoil-to-jotai/` under the directory you ran it from (`--out` changes that);
+the scanner prints the paths. Add the folder to `.gitignore`, or commit only `baseline.json`.
+
 Read `references/inventory.md` for what each section means, then read the report. Before
-proposing anything, tell the user what you found, in this shape:
+proposing anything, tell the user what you found, in this shape (the names in angle brackets
+are fields of the report):
 
 ```
-Recoil inventory: N features (a atoms, b selectors, c atomFamilies, d selectorFamilies) in F files.
-Versions: recoil x, jotai y (or none), react z, typescript t  → target Jotai <major> because …
-Plan from the graph: P free features; Q small components (atomic); largest component R features →
-  hub cut: H hubs (…names…), G fragments, H bridges alive, recommended order …; waves alternative: W waves, B bridges alive.
-Needs a decision: <each item from the table, one line each, with counts>.
-Loadable idioms: n call sites change shape.
+Recoil inventory: <totals.features> features (<byKind>) in <filesImportingRecoil> files (the files the migration touches).
+Versions: recoil x, jotai y (or none), react z, typescript t → target Jotai <major> because … (or: fixed by the project overlay).
+Plan from the graph: <free> free features; <atomic components> small components (one change each); largest component <size> →
+  hub cut: <hubs> hubs (<names>), <fragments> fragments of ≤ <largest>, <hubs> bridges alive, order <hubs-first|hubs-last>;
+  waves alternative: <waves> waves, <max alive> bridges alive.
+Needs a decision: <one line per row of that table, with its count>.
+Check each use: <one line per row of the "mechanical, but check" table, with its count>.
+Loadable idioms: <sum of the idiom table> uses across <files> files change shape.
 ```
 
 ## Step 2 — Strategy and decisions
@@ -58,11 +65,16 @@ harness has one):
   commands count as the gate in this project (typecheck, lint, unit tests, e2e subset).
 
 Do not start editing before the answers; a migration that guesses the storage layout or the
-SSR policy is the one that gets reverted.
+SSR policy is the one that gets reverted. When the project overlay already records a decision
+or the strategy, treat it as answered: say which overlay line settles it instead of asking again.
 
 ## Step 3 — Wave 0: scaffolding
 
-Everything here lands before the first feature moves, in its own change:
+Land what the first change needs before the first feature moves, in its own change. The list
+below is the full set for a large code base; a small one or a first slice takes only the items
+its features will use (the Provider is always needed; the seam only once a hydrated atom moves;
+helpers and the bridges folder only when a consumer or a wave calls for them) — say which items
+you deferred and why.
 
 - Install `jotai` (and `jotai-family`, `jotai-loadable` for v3). Keep `recoil` installed.
 - Mount a Jotai `<Provider>` **inside** `RecoilRoot` (so bridge components can use both). On SSR
@@ -90,21 +102,31 @@ the hubs and the hubs move last. For waves, each wave's new bridges land before 
 Per feature, in this order:
 
 1. **Definition.** Map it with `references/api-map.md` using the feature's row: kind, flags
-   (`async`, `writable`, `effects`, `default:selector`, `param:object`, `waitForAll`, `noWait`)
-   and the ease reasons. Put the Jotai definition next to the Recoil one or in the project's
-   Jotai folder; delete the Recoil definition in the same change once no consumer is left.
+   (`async`, `writable`, `effects`, `default:selector`, `param:object`, `waitForAll`, `noWait`,
+   `refresh-counter`) and the ease reasons. Put the Jotai definition in the project's Jotai
+   folder (the overlay names it; otherwise mirror the layout the project already uses, such as
+   `<area>/jotai/`). Keep it in the same file as the Recoil definition only when the whole file
+   moves in this change. Keep a read function synchronous when an SSR guard returns a value
+   synchronously: marking it `async` turns that guard value into a pending promise and changes
+   the server-rendered markup. Delete the Recoil definition in the same change once no consumer
+   is left.
 2. **Consumers.** The inventory lists every file and its roles. Hooks are mechanical;
    `useRecoilValueLoadable` consumers change shape (§ 6); callbacks, refreshers and imperative
    sets follow § 7 and § 5; `ref` roles (atoms passed to helpers or props) need the helper's
    type changed.
-3. **Tests.** Port `snapshot_UNSTABLE` tests to `createStore()` (§ 9); keep the assertions.
+3. **Tests.** Port `snapshot_UNSTABLE` tests to `createStore()` (§ 9); keep the assertions. When
+   no test touches the feature (`tests` missing from its row) and it is async, writable or
+   persisted, write one store-level test before moving it: the port is the proof that the
+   mapping preserved behaviour.
 4. **Remove the `recoil` import** from every touched file. A file that still imports both after
    the change is either a bridge or a mistake.
 
 Per change (fragment, component or wave), the gate — all of it, every time:
 
-- typecheck and the project's lint on changed files;
+- typecheck (where the project runs it only in CI, say so and name the job) and the project's
+  lint on changed files;
 - unit tests for the touched state, plus the project's chosen e2e subset when consumers are UI;
+  when no test touches the change, report `tests: none touch this change` and why that is fine;
 - `node <skill>/scripts/inventory.mjs <srcRoot> --baseline .recoil-to-jotai/baseline.json`:
   the "gone" list must equal the features of this change, no more, no fewer, and "Needs a
   decision" must not have grown;
@@ -115,7 +137,7 @@ report to the user:
 
 ```
 Moved: <features> (<kind counts>) in <n> files; bridges added/removed: …
-Gate: typecheck ✓ lint ✓ tests <passed/total> ✓ inventory: <gone> of <baseline> gone (<pct>%), decisions unchanged
+Gate: typecheck ✓ | CI <job> · lint ✓ · tests <passed/total> ✓ | none touch this change · inventory: <gone> of <baseline> gone (<pct>%), decisions unchanged
 Next: <next fragment/wave and why>
 ```
 
@@ -145,6 +167,10 @@ Only now is a React 19 upgrade unblocked by state management.
 - `atomWithStorage` with a different key layout than the effect it replaces: users lose data.
 - A writable derived atom that ignores `RESET`: reset silently does nothing.
 - Dropping `cachePolicy_UNSTABLE` on an expensive selector without checking toggling cost.
+- `atomWithRefresh` setters take no argument: `onClick={refresh}` hands them the event and
+  throws in development; write `onClick={() => refresh()}`.
+- Copying the project's existing Jotai code without reading it: an early migration attempt is
+  where the pitfalls above were first made.
 - Keeping both runtimes without a baseline-tracked plan: the migration stalls at the easy 20%.
 
 ## References
@@ -154,4 +180,5 @@ Only now is a React 19 upgrade unblocked by state management.
 - `references/hard-cases.md` — the seam and bridges, families, SSR, persistence, reset,
   loadables, callbacks, cache semantics, tests, finishing.
 - `references/strategies.md` — native vs engine swap vs hybrid, with the decision table.
-- `references/project.md` — present only in a project-specific copy of this skill; read first.
+- `references/project.md` — the project overlay: present in a project's copy of this skill,
+  absent in the public one; read first when it exists.

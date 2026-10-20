@@ -13,7 +13,7 @@
  *                      [--direction sinks-first|sources-first] [--check] [--quiet]
  *
  * Output: <out>/recoil-inventory.json and <out>/recoil-inventory.md
- * (default <out> = <projectRoot>/.recoil-to-jotai).
+ * (default <out> = ./.recoil-to-jotai under the current directory).
  *
  * --check exits 1 while any scanned file still imports 'recoil' (the end-of-migration gate).
  * The `typescript` module is resolved from the project root; set RECOIL_TO_JOTAI_TS to the
@@ -102,6 +102,28 @@ const DECISION_APIS = new Set([
   'waitForAllSettled',
   'RecoilLoadable',
 ]);
+// Mechanical mappings that still need a look at every use (callbacks, loadables, reset, types).
+const CARE_APIS = [
+  'useRecoilCallback',
+  'useRecoilRefresher_UNSTABLE',
+  'useResetRecoilState',
+  'useRecoilValueLoadable',
+  'useRecoilStateLoadable',
+  'snapshot_UNSTABLE',
+  'DefaultValue',
+  'noWait',
+  'waitForAll',
+  'waitForAny',
+  'RecoilLoadable',
+  'Loadable',
+  'RecoilState',
+  'RecoilValue',
+  'RecoilValueReadOnly',
+  'AtomEffect',
+  'Snapshot',
+  'CallbackInterface',
+  'SetterOrUpdater',
+];
 const SKIP_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', 'out', 'coverage', '.turbo']);
 const TEST_FILE = /\.(test|spec)\.[jt]sx?$|__tests__|\/tests?\//;
 const SMALL_COMPONENT = 8; // components up to this size are proposed as one atomic change
@@ -524,9 +546,10 @@ class FileAnalyzer {
         if (ts.isIdentifier(callee) && ['get', 'set', 'reset', 'refresh'].includes(callee.text)) via = callee.text;
         else if (ts.isPropertyAccessExpression(callee) && CALLBACK_OPS.has(callee.name.text)) via = callee.name.text;
         if (via && n.arguments[0]) {
+          const valueUnused = via === 'get' && Boolean(n.parent) && ts.isExpressionStatement(n.parent); // `get(tick);` as a bare statement
           for (const target of this.refTargets(n.arguments[0], waits)) {
             if (target.wrapper === 'noWait') usesNoWait = true;
-            deps.push({ ...target, via });
+            deps.push({ ...target, via, valueUnused });
           }
         }
       }
@@ -911,6 +934,24 @@ function run(args) {
   const scannedFiles = new Set(files);
   const resolveModule = makeResolver(ts, compilerOptions, scannedFiles);
   const rel = (p) => relative(projectRoot, p);
+  const relId = (id) => {
+    const i = id.lastIndexOf('#');
+    return `${rel(id.slice(0, i))}#${id.slice(i + 1)}`;
+  };
+  const relIds = (ids) => ids.map(relId);
+  const relComponent = (c) => ({
+    ...c,
+    members: relIds(c.members),
+    waves: c.waves.map((w) => ({ ...w, features: relIds(w.features), newBridges: relIds(w.newBridges), retiredBridges: relIds(w.retiredBridges) })),
+    cycles: c.cycles.map(relIds),
+    hubCut: c.hubCut
+      ? {
+          ...c.hubCut,
+          hubs: c.hubCut.hubs.map((h) => ({ ...h, id: relId(h.id) })),
+          fragments: c.hubCut.fragments.map((f) => ({ ...f, members: relIds(f.members), readsHubs: relIds(f.readsHubs), writesHubs: relIds(f.writesHubs) })),
+        }
+      : null,
+  });
 
   const fileInfos = new Map();
   const extras = new Map();
@@ -960,7 +1001,7 @@ function run(args) {
       if (id && features.has(id)) {
         if (seen.has(id)) continue;
         seen.add(id);
-        const dep = { id, via: raw.via, wrapper: raw.wrapper, familyCall: raw.familyCall, paramLiteral: raw.paramLiteral };
+        const dep = { id, via: raw.via, wrapper: raw.wrapper, familyCall: raw.familyCall, paramLiteral: raw.paramLiteral, valueUnused: Boolean(raw.valueUnused) };
         if (id === feature.id) dep.self = true;
         else features.get(id).dependents.push(feature.id);
         feature.deps.push(dep);
@@ -989,9 +1030,17 @@ function run(args) {
     }
     for (const [id, entry] of perFeature) features.get(id).consumers.push(entry);
   }
+  const READ_ROLES = /^(useRecoilValue|useRecoilState|useRecoilValueLoadable|useRecoilStateLoadable|useRecoilCallback:get|snapshot:get)/;
   for (const feature of features.values()) {
     feature.consumers.sort((a, b) => a.file.localeCompare(b.file));
     feature.hasTests = feature.consumers.some((c) => c.isTest);
+    // A refresh counter: an atom read only as `get(x);` (value unused) and never read by components.
+    const incoming = feature.dependents.map((d) => features.get(d).deps.find((e) => e.id === feature.id));
+    feature.flags.refreshCounter =
+      feature.kind === 'atom' &&
+      incoming.length > 0 &&
+      incoming.every((e) => e && e.via === 'get' && e.valueUnused) &&
+      !feature.consumers.some((c) => Object.keys(c.roles).some((r) => READ_ROLES.test(r)));
     feature.ease = scoreEase(feature);
   }
 
@@ -1087,6 +1136,8 @@ function run(args) {
   if (objectFamilies.length) decisions['families with object params'] = { count: objectFamilies.length, files: where(objectFamilies) };
   const crossRuntime = [...features.values()].filter((f) => f.crossRuntimeDeps.length);
   if (crossRuntime.length) decisions['cross-runtime reads (Recoil reading Jotai)'] = { count: crossRuntime.length, files: crossRuntime.map((f) => `${rel(f.file)}:${f.line} ${f.name} -> ${f.crossRuntimeDeps.join(', ')}`) };
+  const counters = [...features.values()].filter((f) => f.flags.refreshCounter);
+  if (counters.length) decisions['refresh counters (fold each with its selector into one atomWithRefresh)'] = { count: counters.length, files: where(counters) };
   const unresolved = [...features.values()].filter((f) => f.unresolvedDeps.length);
   if (unresolved.length) decisions['unresolved dependencies'] = { count: unresolved.length, files: unresolved.slice(0, 8).map((f) => `${rel(f.file)}:${f.line} ${f.name} -> ${f.unresolvedDeps.join(', ')}`) };
 
@@ -1106,6 +1157,8 @@ function run(args) {
     };
   }
 
+  const attention = {};
+  for (const api of CARE_APIS) if (apiUsage[api]) attention[api] = apiUsage[api];
   const output = {
     generatedAt: new Date().toISOString(),
     projectRoot,
@@ -1127,22 +1180,30 @@ function run(args) {
       largestComponent: components[0]?.size || 0,
     },
     apiUsage,
+    attention,
     loadableIdioms,
     decisions,
     baseline,
     plan: {
       direction: args.direction,
       smallComponentMax: SMALL_COMPONENT,
-      free: components.filter((c) => c.size === 1).map((c) => c.members[0]),
-      components: components.filter((c) => c.size > 1),
+      free: components.filter((c) => c.size === 1).map((c) => relId(c.members[0])),
+      components: components.filter((c) => c.size > 1).map(relComponent),
     },
     features: [...features.values()]
       .sort((a, b) => a.component - b.component || a.wave - b.wave || b.ease.score - a.ease.score || a.name.localeCompare(b.name))
-      .map((f) => ({ ...f, file: rel(f.file), consumers: f.consumers.map((c) => ({ ...c, file: rel(c.file) })) })),
+      .map((f) => ({
+        ...f,
+        id: relId(f.id),
+        file: rel(f.file),
+        deps: f.deps.map((d) => ({ ...d, id: relId(d.id) })),
+        dependents: f.dependents.map(relId),
+        consumers: f.consumers.map((c) => ({ ...c, file: rel(c.file) })),
+      })),
     easeRubric: EASE_RUBRIC,
   };
 
-  const outDir = resolve(args.out || join(projectRoot, '.recoil-to-jotai'));
+  const outDir = resolve(args.out || join(process.cwd(), '.recoil-to-jotai'));
   mkdirSync(outDir, { recursive: true });
   const jsonPath = join(outDir, 'recoil-inventory.json');
   const mdPath = join(outDir, 'recoil-inventory.md');
@@ -1155,6 +1216,10 @@ function run(args) {
       `Recoil inventory: ${t.features} features (${Object.entries(t.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}) in ${t.filesImportingRecoil} files importing recoil; ` +
         `${t.freeFeatures} free, ${t.components} connected components (largest ${t.largestComponent}).`,
     );
+    const decisionCount = Object.values(decisions).reduce((n, d) => n + d.count, 0);
+    const idiomUses = Object.values(loadableIdioms).reduce((n, i) => n + i.count, 0);
+    const attentionUses = Object.values(attention).reduce((n, a) => n + a.count, 0);
+    console.log(`Needs a decision: ${Object.keys(decisions).length} items (${decisionCount} places); mechanical-but-check APIs: ${attentionUses} uses; loadable idioms: ${idiomUses} uses in ${Object.values(loadableIdioms).reduce((n, i) => Math.max(n, i.files), 0)}+ files.`);
     const big = components[0];
     if (big?.hubCut) console.log(`Largest component: hub cut = ${big.hubCut.hubs.length} hubs -> ${big.hubCut.fragments.length} fragments (largest ${big.hubCut.largestFragment}), ${big.hubCut.bridgesAlive} bridges alive; waves = ${big.waves.length} waves, ${big.maxAliveBridges} bridges alive (${big.direction}).`);
     if (baseline) console.log(`Since baseline (${baseline.generatedAt}): ${baseline.gone.length} of ${baseline.total} gone, ${baseline.added.length} added.`);
@@ -1185,7 +1250,7 @@ function renderMarkdown(o) {
   for (const [name, v] of Object.entries(o.versions)) lines.push(`| ${name} | ${v.declared || '—'} | ${v.installed || '—'} |`);
   lines.push('', '## Totals', '');
   lines.push(`- Recoil features: **${t.features}** (${Object.entries(t.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}).`);
-  lines.push(`- Files importing \`recoil\`: ${t.filesImportingRecoil}; files that consume a feature: ${t.consumerFiles}.`);
+  lines.push(`- Files importing \`recoil\`: ${t.filesImportingRecoil} (the files the migration touches); of these, ${t.consumerFiles} consume a feature.`);
   lines.push(`- Jotai already present: ${t.jotaiDefinitions} definitions in ${t.filesImportingJotai} files.`);
   lines.push(`- Ease distribution (5 = easiest): ${Object.entries(t.easeDistribution).sort((a, b) => b[0].localeCompare(a[0])).map(([k, v]) => `${k}: ${v}`).join(', ')}.`);
   lines.push(`- Free (isolated) features: ${t.freeFeatures}; connected components: ${t.components} (largest ${t.largestComponent}).`);
@@ -1200,6 +1265,10 @@ function renderMarkdown(o) {
   if (Object.keys(o.loadableIdioms).length) {
     lines.push('', '### Loadable idioms (in files importing recoil)', '', '| Idiom | Uses | Files |', '| --- | --- | --- |');
     for (const [idiom, u] of Object.entries(o.loadableIdioms).sort((a, b) => b[1].count - a[1].count)) lines.push(`| \`${idiom}\` | ${u.count} | ${u.files} |`);
+  }
+  if (Object.keys(o.attention).length) {
+    lines.push('', '### Mechanical, but check each use against the API map', '', '| API | Uses | Files |', '| --- | --- | --- |');
+    for (const [api, u] of Object.entries(o.attention).sort((a, b) => b[1].count - a[1].count)) lines.push(`| \`${api}\` | ${u.count} | ${u.files} |`);
   }
   lines.push('', '## Needs a decision', '');
   if (!Object.keys(o.decisions).length) lines.push('Nothing beyond the mechanical mappings.');
@@ -1223,6 +1292,10 @@ function renderMarkdown(o) {
       h.fragments.forEach((f, i) => lines.push(`| ${i + 1} | ${f.size} | ${code(f.members)} | ${code(f.readsHubs)} | ${code(f.writesHubs)} |`));
       lines.push('', `**Waves** (${c.direction}) — the alternative cut: ${c.waves.length} waves, max bridges alive ${c.maxAliveBridges} (${c.otherDirection}: ${c.otherDirectionMaxAliveBridges}).`, '');
     }
+    if (c.atomic) {
+      lines.push(`Move together in one change: ${code(c.members)}. No bridge is needed.`);
+      continue;
+    }
     lines.push('| Wave | Features | New bridges | Retired bridges | Alive |', '| --- | --- | --- | --- | --- |');
     for (const w of c.waves) lines.push(`| ${w.wave} | ${code(w.features)} | ${code(w.newBridges)} | ${code(w.retiredBridges)} | ${w.aliveBridges} |`);
   }
@@ -1238,6 +1311,7 @@ function renderMarkdown(o) {
     if (f.flags.ssrGuard) bits.push('ssr-guard');
     if (f.flags.usesWaitFor.length) bits.push(f.flags.usesWaitFor.join('/'));
     if (f.flags.usesNoWait) bits.push('noWait');
+    if (f.flags.refreshCounter) bits.push('refresh-counter');
     if (f.hasTests) bits.push('tests');
     const deps = f.deps.map((d) => `\`${nameOf(d.id)}\`${d.wrapper ? ` (${d.wrapper})` : ''}`).join(', ') || '—';
     lines.push(`| \`${f.name}\` | ${f.kind} | ${f.ease.score} | ${[...new Set(bits)].join(', ') || '—'} | \`${f.file}:${f.line}\` | ${deps} | ${code(f.dependents)} | ${f.consumers.length} | ${f.component} | ${f.fragment ?? '—'} | ${f.wave} |`);

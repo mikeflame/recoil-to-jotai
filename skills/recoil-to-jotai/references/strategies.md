@@ -83,6 +83,10 @@ explicit: name the components under each strategy in the plan.
 | SSR (Next.js, Remix) with families keyed per request | B, and fix family eviction in wave 0 regardless of strategy |
 | No tests on the state layer | A, or write store-level tests for the component before moving it |
 
+Record the verdict and its reason in the project overlay (`references/project.md`) so Step 2 does
+not reopen the question on every run; a table row is a lean, not a rule, and a code base that hits
+"A or C" may still choose B for a reason worth writing down.
+
 ## What not to do
 
 - One big-bang PR that rewrites every file. It cannot be reviewed, bisected, or shipped behind a flag.
