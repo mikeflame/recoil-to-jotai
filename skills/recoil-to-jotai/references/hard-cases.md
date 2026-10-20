@@ -182,10 +182,14 @@ export const valueMaybe = <T>(l: Loadable<T>) => (l.state === 'hasData' ? l.data
 export const errorMaybe = <T>(l: Loadable<T>) => (l.state === 'hasError' ? l.error : undefined);
 ```
 
-Create `loadable(x)` atoms at module level next to `x`. A `loadable()` call inside a component
-creates a new atom each render, which re-subscribes and re-suspends; the same holds for
-`get(loadable(x))` inside a read function (the `noWait` replacement), which creates a new atom on
-every evaluation — define `const xLoadableAtom = loadable(x)` once and read that.
+Create wrapper atoms at module level next to the atom they wrap, and know which wrappers are
+safe when you don't: `loadable(x)` (jotai 2 `jotai/utils` and `jotai-loadable`) memoises per
+source atom in a WeakMap, so an inline `loadable(x)` in render or inside a read returns the same
+atom every time. `unwrap(x, fallback)` and `selectAtom(x, selector, equals)` memoise on the atom
+**and the functions you pass**, so inline arrow functions give a new atom per render — the atom
+re-subscribes and, for async sources, re-suspends. Family members are cached per parameter, by
+reference unless you pass `areEqual`. A module-level `const xLoadableAtom = loadable(x)` costs
+nothing, reads better, and gives tests one identity to assert on.
 
 Jotai 3 removed `loadable` from `jotai/utils`. Use the `jotai-loadable` package, the userland
 version from the v3 migration guide, or `unwrap(x, (prev) => prev)` when the consumer only wants

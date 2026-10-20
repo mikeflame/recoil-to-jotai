@@ -30,11 +30,13 @@
         "No file under src/ was modified (git status clean apart from generated report files)",
         "The analysis reports 17 Recoil features with the correct breakdown: 7 atoms, 7 selectors, 2 atomFamilies, 1 selectorFamily (or 19 nodes when the two nested default selectors are counted separately)",
         "searchResultsFamily is called out as risky because its parameter is an object compared by value in Recoil and by reference in Jotai",
-        "themeAtom's localStorage effect is called out, including that the storage key/layout must be preserved for existing users",
+        "themeAtom's localStorage effect is called out AND the analysis states, in so many words, that the storage key and JSON layout must be preserved so existing users keep their data (quote the sentence)",
         "The RecoilRoot initializeState hydration of userAtom is identified and a useHydrateAtoms-based seam is proposed",
-        "The proposed order migrates isolated features first and keeps dependent features together (or explains bridges), rather than file-by-file",
+        "The proposed order never moves a feature while a feature that reads it (or that it reads) is still on the other runtime without naming the bridge \u2014 walk each step's scope against the dependency edges in src/state; a step that moves settingsAtom before dashboardSelector without a bridge fails",
         "The response asks the user to decide the target Jotai major version (2 vs 3) before starting",
-        "The response lists the Loadable consumers (useRecoilValueLoadable/useRecoilStateLoadable, valueMaybe, .contents) as call sites that change shape"
+        "The response lists the Loadable consumers (useRecoilValueLoadable/useRecoilStateLoadable, valueMaybe, .contents) as call sites that change shape",
+        "The analysis warns that an atomWithRefresh setter must be called with no argument (onClick={refresh} would pass the click event), or otherwise flags the refresh wiring in Posts.tsx as a change point",
+        "The analysis notices that jotai and its companion packages sit in devDependencies and must move to dependencies before shipping"
       ]
     },
     {

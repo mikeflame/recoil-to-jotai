@@ -164,7 +164,9 @@ Only now is a React 19 upgrade unblocked by state management.
 ## Pitfalls that cost real migrations weeks
 
 - Migrating a selector before its dependencies without a bridge; it has nothing to read.
-- `loadable(x)` or `atomFamily` members created inside render: new atom per render.
+- `unwrap(x, () => …)`, `selectAtom(x, (v) => …)` or family members keyed by a fresh object
+  created inside render: a new atom per render (`loadable(x)` is memoised per atom, but keep
+  wrappers at module level anyway).
 - Families keyed by objects without `areEqual`; family maps never evicted on a server.
 - Async atoms read during SSR without a guard or hydration: wasted requests, or a suspended
   server render.
